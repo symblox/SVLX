@@ -30,7 +30,7 @@ contract SVLX is ReentrancyGuard {
     address public proposedAdmin;
 
     /// @dev Staking pool addresses
-    EnumerableSet.AddressSet public stakingPools;
+    EnumerableSet.AddressSet private stakingPools;
 
     /// @notice Next pool index
     uint256 public poolIndex;
@@ -511,7 +511,7 @@ contract SVLX is ReentrancyGuard {
     }
 
     /// @notice Return the current claimable amount from orderedWithdraw in previous epochs
-    function _getClaimableOrderedAmount(address poolAddress) internal returns (uint256) {
+    function _getClaimableOrderedAmount(address poolAddress) internal view returns (uint256) {
         IStakingAuRa auRa = stakingAuRa;
         uint256 currEpoch = auRa.stakingEpoch();
         if (currEpoch > auRa.orderWithdrawEpoch(poolAddress, address(this)))
