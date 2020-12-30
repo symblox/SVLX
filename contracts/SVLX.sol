@@ -148,8 +148,8 @@ contract SVLX is ReentrancyGuard {
                 currPool = stakingPools.at(i);
                 uint256 claimAmount = _getClaimableOrderedAmount(currPool);
                 if (claimAmount > 0) {
-                    auRa.claimOrderedWithdraw(poolAddress);
-                    emit ClaimOrderedWithdraw(poolAddress, claimAmount);
+                    auRa.claimOrderedWithdraw(currPool);
+                    emit ClaimOrderedWithdraw(currPool, claimAmount);
                 }
             }
 
