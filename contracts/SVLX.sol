@@ -139,9 +139,7 @@ contract SVLX is ReentrancyGuard {
 
         if (redeemable < wad && stakingAuRa.areStakeAndWithdrawAllowed()) {
             // Redeemable balance is not enought and the staking service is working
-
             IStakingAuRa auRa = stakingAuRa;
-
             address currPool;
             // claim previously ordered VLX from the pool
             for (uint256 i = 0; i < stakingPools.length(); ++i) {
@@ -156,7 +154,6 @@ contract SVLX is ReentrancyGuard {
             // Get the latest redeemable amount
             redeemable = address(this).balance.sub(reward);
             uint256 needToWithdraw = 0;
-
             if (redeemable < wad) {
                 uint256 minStake = auRa.delegatorMinStake();
                 uint256 canWithdraw = 0;
@@ -191,33 +188,42 @@ contract SVLX is ReentrancyGuard {
             redeemable = address(this).balance.sub(reward);
 
             if (redeemable < wad) {
-                uint256 minStake = auRa.delegatorMinStake();
-                uint256 canOrderWithdraw = 0;
-                uint256 maxOrderWithdrawal = 0;
-                for (uint256 i = 0; i < stakingPools.length(); ++i) {
-                    needToWithdraw = wad > redeemable ? wad.sub(redeemable) : 0;
-                    if (needToWithdraw == 0) {
-                        // Stop the loop if it's enough for user to withdraw
-                        break;
-                    }
-                    currPool = stakingPools.at(i);
-                    // uint256 remainingWad = wad.sub(redeemable);
-                    maxOrderWithdrawal = auRa.maxWithdrawOrderAllowed(currPool, address(this));
-                    if (maxOrderWithdrawal > 0) {
-                        if (
-                            maxOrderWithdrawal >= needToWithdraw &&
-                            maxOrderWithdrawal.sub(needToWithdraw) >= minStake
-                        ) {
-                            canOrderWithdraw = needToWithdraw;
-                        } else {
-                            canOrderWithdraw = maxOrderWithdrawal;
+                uint256 length = stakingPools.length();
+                uint256 totalOrderedAmount;
+                for (uint256 i = 0; i < length; ++i) {
+                    uint256 claimAmount =
+                        auRa.orderedWithdrawAmount(stakingPools.at(i), address(this));
+                    totalOrderedAmount = totalOrderedAmount.add(claimAmount);
+                }
+                if (totalOrderedAmount < wad) {
+                    uint256 minStake = auRa.delegatorMinStake();
+                    uint256 canOrderWithdraw = 0;
+                    uint256 maxOrderWithdrawal = 0;
+                    for (uint256 i = 0; i < stakingPools.length(); ++i) {
+                        needToWithdraw = wad > redeemable ? wad.sub(redeemable) : 0;
+                        if (needToWithdraw == 0) {
+                            // Stop the loop if it's enough for user to withdraw
+                            break;
                         }
+                        currPool = stakingPools.at(i);
+                        // uint256 remainingWad = wad.sub(redeemable);
+                        maxOrderWithdrawal = auRa.maxWithdrawOrderAllowed(currPool, address(this));
+                        if (maxOrderWithdrawal > 0) {
+                            if (
+                                maxOrderWithdrawal >= needToWithdraw &&
+                                maxOrderWithdrawal.sub(needToWithdraw) >= minStake
+                            ) {
+                                canOrderWithdraw = needToWithdraw;
+                            } else {
+                                canOrderWithdraw = maxOrderWithdrawal;
+                            }
 
-                        auRa.orderWithdraw(currPool, int256(canOrderWithdraw));
-                        emit OrderWithdraw(currPool, int256(canOrderWithdraw));
+                            auRa.orderWithdraw(currPool, int256(canOrderWithdraw));
+                            emit OrderWithdraw(currPool, int256(canOrderWithdraw));
 
-                        // Update the redeemable amount all the time
-                        redeemable = address(this).balance.sub(reward);
+                            // Update the redeemable amount all the time
+                            redeemable = address(this).balance.sub(reward);
+                        }
                     }
                 }
             }
