@@ -133,7 +133,7 @@ contract SVLX is ReentrancyGuard {
     /// @notice Redeem VLX from the stake pools
     function withdraw(uint256 wad) external nonReentrant returns (uint256) {
         require(balanceOf[msg.sender] >= wad, "Insufficient balance");
-
+        bool hasAction;
         uint256 reward = getTotalRewards();
         uint256 redeemable = address(this).balance.sub(reward);
 
@@ -147,6 +147,7 @@ contract SVLX is ReentrancyGuard {
                 uint256 claimAmount = _getClaimableOrderedAmount(currPool);
                 if (claimAmount > 0) {
                     auRa.claimOrderedWithdraw(currPool);
+                    hasAction = true;
                     emit ClaimOrderedWithdraw(currPool, claimAmount);
                 }
             }
@@ -176,6 +177,7 @@ contract SVLX is ReentrancyGuard {
                             canWithdraw = maxAllowed;
                         }
                         auRa.withdraw(currPool, canWithdraw);
+                        hasAction = true;
                         emit PoolWithdraw(currPool, canWithdraw);
 
                         // Update the redeemable amount all the time
@@ -219,6 +221,7 @@ contract SVLX is ReentrancyGuard {
                             }
 
                             auRa.orderWithdraw(currPool, int256(canOrderWithdraw));
+                            hasAction = true;
                             emit OrderWithdraw(currPool, int256(canOrderWithdraw));
 
                             // Update the redeemable amount all the time
@@ -237,7 +240,10 @@ contract SVLX is ReentrancyGuard {
         if (withdrawAmount > 0) {
             _burn(msg.sender, withdrawAmount);
             msg.sender.transfer(withdrawAmount);
+            hasAction = true;
         }
+
+        require(hasAction, "no action has exec");
 
         emit Withdrawal(msg.sender, withdrawAmount);
 
