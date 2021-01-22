@@ -1,0 +1,7 @@
+# Used to deploy to testnets
+export HDWALLET_MNEMONIC=''
+
+# VELAS blockchain rpc endpoints
+export VELAS_TEST_RPC='https://explorer.testnet.veladev.net/rpc'
+
+export VELAS_RPC='https://explorer.velas.com/rpc'

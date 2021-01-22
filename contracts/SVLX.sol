@@ -2,6 +2,7 @@
 
 pragma solidity >=0.6.0 <0.7.0;
 
+import "./libs/Initializable.sol";
 import "./libs/SafeERC20.sol";
 import "./libs/Math.sol";
 import "./libs/ReentrancyGuard.sol";
@@ -9,16 +10,16 @@ import "./libs/EnumerableSet.sol";
 
 import "./interfaces/IStakingAuRa.sol";
 
-contract SVLX is ReentrancyGuard {
+contract SVLX is Initializable, ReentrancyGuard {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     using Math for uint256;
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    string public name = "Staking Velas";
-    string public symbol = "SVLX";
-    uint8 public decimals = 18;
+    string public name;
+    string public symbol;
+    uint8 public decimals;
 
     /// @notice VELAS staking contract
     IStakingAuRa public stakingAuRa;
@@ -88,15 +89,18 @@ contract SVLX is ReentrancyGuard {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    constructor(address _stakingAuRa) public {
-        admin = msg.sender;
-        poolIndex = 0;
-        stakingAuRa = IStakingAuRa(_stakingAuRa);
-    }
-
     modifier onlyAdmin {
         require(msg.sender == admin, "Admin required");
         _;
+    }
+
+    function initialize() public initializer {
+        admin = msg.sender;
+        name = "Staking Velas";
+        symbol = "SVLX";
+        decimals = 18;
+        poolIndex = 0;
+        stakingAuRa = IStakingAuRa(0x1100000000000000000000000000000000000001);
     }
 
     /// @notice Deposit VLX into VELAS pools and mint SVLX tokens
@@ -239,11 +243,11 @@ contract SVLX is ReentrancyGuard {
 
         if (withdrawAmount > 0) {
             _burn(msg.sender, withdrawAmount);
-            msg.sender.transfer(withdrawAmount);
             hasAction = true;
+            _sendWithdrawnStakeAmount(msg.sender, withdrawAmount);
         }
 
-        require(hasAction, "no action has exec");
+        require(hasAction, "no action executed");
 
         emit Withdrawal(msg.sender, withdrawAmount);
 
@@ -463,7 +467,7 @@ contract SVLX is ReentrancyGuard {
 
     function claimRewards() external returns (uint256) {
         updateFor(msg.sender);
-        msg.sender.transfer(userRewardClaimable[msg.sender]);
+        _sendWithdrawnStakeAmount(msg.sender, userRewardClaimable[msg.sender]);
         userRewardClaimable[msg.sender] = 0;
         rewardDebt = getTotalRewards();
     }
@@ -531,7 +535,31 @@ contract SVLX is ReentrancyGuard {
         return 0;
     }
 
-    fallback() external {}
+    /// @dev Sends coins from this contract to the specified address.
+    /// @param _to The target address to send amount to.
+    /// @param _amount The amount to send.
+    function _sendWithdrawnStakeAmount(address payable _to, uint256 _amount) internal {
+        if (!_to.send(_amount)) {
+            // We use the `Sacrifice` trick to be sure the coins can be 100% sent to the receiver.
+            // Otherwise, if the receiver is a contract which has a revert in its fallback function,
+            // the sending will fail.
+            (new Sacrifice){ value: _amount }(_to);
+        }
+    }
+
+    function airdrop() external payable {}
+
+    fallback() external payable {}
 
     receive() external payable {}
+
+    function getStakingPool(uint256 index) external view returns (address) {
+        return stakingPools.at(index);
+    }
+}
+
+contract Sacrifice {
+    constructor(address payable _recipient) public payable {
+        selfdestruct(_recipient);
+    }
 }
