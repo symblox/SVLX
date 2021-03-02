@@ -39,10 +39,8 @@ contract SVLX is Initializable, ReentrancyGuard {
     /// @dev SVLX token total supply
     uint256 private _totalSupply;
 
-    uint256 public rewardIndex = 0;
-    uint256 public rewardDebt = 0;
-    mapping(address => uint256) public userRewardClaimable;
-    mapping(address => uint256) public userRewardIndex;
+    uint256 internal constant WAD = 1e18;
+    uint256 internal constant initialExchangeRateMantissa = WAD;
 
     event Approval(address indexed src, address indexed guy, uint256 wad);
     event Transfer(address indexed src, address indexed dst, uint256 wad);
@@ -110,12 +108,11 @@ contract SVLX is Initializable, ReentrancyGuard {
         address currentPool = stakingPools.at(poolIndex);
         require(currentPool != address(0), "Pool is zero address");
 
-        // NOTE: Need to mint the SVLX tokens here first to get the correct balance and reward amount
-        _mint(msg.sender, msg.value);
+        // NOTE: Need to mint the SVLX tokens here first to get the correct balance
+        uint256 mintAmount = msg.value.mul(WAD).div(exchangeRate());
+        _mint(msg.sender, mintAmount);
 
-        // update the reward
-        uint256 reward = getTotalRewards();
-        uint256 redeemable = address(this).balance.sub(reward);
+        uint256 redeemable = address(this).balance;
 
         // Rotating the staking pool for the next action
         poolIndex = (poolIndex + 1) % stakingPools.length();
@@ -131,15 +128,14 @@ contract SVLX is Initializable, ReentrancyGuard {
         }
         // else we just leave the deposited tokens in the contract
 
-        emit Deposit(msg.sender, msg.value, redeemable);
+        emit Deposit(msg.sender, mintAmount, redeemable);
     }
 
     /// @notice Redeem VLX from the stake pools
     function withdraw(uint256 wad) external nonReentrant returns (uint256) {
-        require(balanceOf[msg.sender] >= wad, "Insufficient balance");
+        require(balanceOf[msg.sender] >= wad.mul(WAD).div(exchangeRate()), "Insufficient balance");
         bool hasAction;
-        uint256 reward = getTotalRewards();
-        uint256 redeemable = address(this).balance.sub(reward);
+        uint256 redeemable = address(this).balance;
 
         if (redeemable < wad && stakingAuRa.areStakeAndWithdrawAllowed()) {
             // Redeemable balance is not enought and the staking service is working
@@ -157,7 +153,7 @@ contract SVLX is Initializable, ReentrancyGuard {
             }
 
             // Get the latest redeemable amount
-            redeemable = address(this).balance.sub(reward);
+            redeemable = address(this).balance;
             uint256 needToWithdraw = 0;
             if (redeemable < wad) {
                 uint256 minStake = auRa.delegatorMinStake();
@@ -185,13 +181,13 @@ contract SVLX is Initializable, ReentrancyGuard {
                         emit PoolWithdraw(currPool, canWithdraw);
 
                         // Update the redeemable amount all the time
-                        redeemable = address(this).balance.sub(reward);
+                        redeemable = address(this).balance;
                     }
                 }
             }
 
             // Update the redeemable amount all the time
-            redeemable = address(this).balance.sub(reward);
+            redeemable = address(this).balance;
 
             if (redeemable < wad) {
                 uint256 length = stakingPools.length();
@@ -229,7 +225,7 @@ contract SVLX is Initializable, ReentrancyGuard {
                             emit OrderWithdraw(currPool, int256(canOrderWithdraw));
 
                             // Update the redeemable amount all the time
-                            redeemable = address(this).balance.sub(reward);
+                            redeemable = address(this).balance;
                         }
                     }
                 }
@@ -237,12 +233,12 @@ contract SVLX is Initializable, ReentrancyGuard {
         }
 
         // Update the redeemable amount all the time
-        redeemable = address(this).balance.sub(reward);
+        redeemable = address(this).balance;
 
         uint256 withdrawAmount = wad.min(redeemable);
-
         if (withdrawAmount > 0) {
-            _burn(msg.sender, withdrawAmount);
+            uint256 burnAmount = withdrawAmount.mul(WAD).div(exchangeRate());
+            _burn(msg.sender, burnAmount);
             hasAction = true;
             _sendWithdrawnStakeAmount(msg.sender, withdrawAmount);
         }
@@ -270,6 +266,24 @@ contract SVLX is Initializable, ReentrancyGuard {
     function getTotalStaked() external view returns (uint256 res) {
         for (uint256 i = 0; i < stakingPools.length(); ++i) {
             res = res.add(stakingAuRa.stakeAmount(stakingPools.at(i), address(this)));
+        }
+    }
+
+    function exchangeRate() public view returns (uint256) {
+        if (_totalSupply == 0) {
+            return initialExchangeRateMantissa;
+        } else {
+            uint256 currentBalance = getCashPrior();
+            uint256 poolBalance = getPoolTotalBalance();
+            return poolBalance.add(currentBalance).mul(WAD).div(_totalSupply);
+        }
+    }
+
+    function getCashPrior() internal view returns (uint256) {
+        if (address(this).balance > msg.value) {
+            return address(this).balance.sub(msg.value);
+        } else {
+            return 0;
         }
     }
 
@@ -388,6 +402,10 @@ contract SVLX is Initializable, ReentrancyGuard {
         emit ClaimAdmin(oldAdmin, admin);
     }
 
+    function balanceOfUnderlying(address owner) external view returns (uint256) {
+        return balanceOf[owner].mul(exchangeRate()).div(WAD);
+    }
+
     function totalSupply() external view returns (uint256) {
         return _totalSupply;
     }
@@ -408,8 +426,6 @@ contract SVLX is Initializable, ReentrancyGuard {
         uint256 wad
     ) public returns (bool) {
         require(balanceOf[src] >= wad);
-        updateFor(src);
-        updateFor(dst);
 
         if (src != msg.sender && allowance[src][msg.sender] != uint256(-1)) {
             require(allowance[src][msg.sender] >= wad);
@@ -424,31 +440,9 @@ contract SVLX is Initializable, ReentrancyGuard {
         return true;
     }
 
-    function getUserRewards(address account) external returns (uint256) {
-        updateFor(account);
-        return userRewardClaimable[account];
-    }
-
-    /// @notice Return the total staking rewards collected
-    function getTotalRewards() public view returns (uint256) {
-        uint256 currentBalance = address(this).balance;
-        uint256 poolBalance = getPoolTotalBalance();
-        if (poolBalance.add(currentBalance) <= _totalSupply) {
-            return 0;
-        } else {
-            return poolBalance.add(currentBalance).sub(_totalSupply);
-        }
-    }
-
     /// @notice Returnt the total amount that can be redeemed by the SVLX holders
     function getLocalRedeemable() public view returns (uint256) {
-        uint256 currentBalance = address(this).balance;
-        uint256 reward = getTotalRewards();
-        if (currentBalance > reward) {
-            return currentBalance.sub(reward);
-        } else {
-            return 0;
-        }
+        return getCashPrior();
     }
 
     /// @notice Get the total withdrawable amount, including the redeemable balance of the contract,
@@ -465,60 +459,16 @@ contract SVLX is Initializable, ReentrancyGuard {
         }
     }
 
-    function claimRewards() external returns (uint256) {
-        updateFor(msg.sender);
-        _sendWithdrawnStakeAmount(msg.sender, userRewardClaimable[msg.sender]);
-        userRewardClaimable[msg.sender] = 0;
-        rewardDebt = getTotalRewards();
-    }
-
-    function updateFor(address recipient) public {
-        _update();
-        uint256 _supplied = balanceOf[recipient];
-        if (_supplied > 0) {
-            uint256 _supplyIndex = userRewardIndex[recipient];
-            userRewardIndex[recipient] = rewardIndex;
-            uint256 _delta = rewardIndex.sub(_supplyIndex, "rewardIndex delta");
-            if (_delta > 0) {
-                uint256 _share = _supplied.mul(_delta).div(1e18);
-                userRewardClaimable[recipient] = userRewardClaimable[recipient].add(_share);
-            }
-        } else {
-            userRewardIndex[recipient] = rewardIndex;
-        }
-    }
-
-    function update() external {
-        _update();
-    }
-
-    function _update() internal {
-        if (_totalSupply > 0) {
-            uint256 _bal = getTotalRewards();
-            if (_bal > rewardDebt) {
-                uint256 _diff = _bal.sub(rewardDebt, "rewardDebt _diff");
-                if (_diff > 0) {
-                    uint256 _ratio = _diff.mul(1e18).div(_totalSupply);
-                    if (_ratio > 0) {
-                        rewardIndex = rewardIndex.add(_ratio);
-                        rewardDebt = _bal;
-                    }
-                }
-            }
-        }
-    }
-
     function _mint(address dst, uint256 amount) internal {
         // mint the amount
         _totalSupply = _totalSupply.add(amount);
         // transfer the amount to the recipient
         balanceOf[dst] = balanceOf[dst].add(amount);
-        updateFor(dst);
         emit Transfer(address(0), dst, amount);
     }
 
     function _burn(address dst, uint256 amount) internal {
-        updateFor(dst);
+        require(balanceOf[dst] >= amount, "burn amount exceeds balance'");
         // mint the amount
         _totalSupply = _totalSupply.sub(amount);
         // transfer the amount to the recipient
