@@ -497,8 +497,6 @@ contract SVLX is Initializable, ReentrancyGuard {
         }
     }
 
-    function airdrop() external payable {}
-
     fallback() external payable {}
 
     receive() external payable {}
